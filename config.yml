@@ -1,0 +1,28 @@
+server:
+  host: "0.0.0.0"
+  port: 8081
+
+database:
+  type: "sqlite"
+  path: "./data/agents.db"
+
+logging:
+  level: "info"
+  format: "json"
+
+llm:
+  providers:
+    ollama:
+      base_url: "http://localhost:11434"
+
+context:
+  strategies:
+    last_n:
+      default_count: 10
+    sliding_window:
+      window_size: 5
+      overlap: 2
+    summarize:
+      max_context_length: 20
+      keep_recent: 5
+      summary_model: "gpt-3.5-turbo"

@@ -1,0 +1,39 @@
+server:
+  host: "0.0.0.0"
+  port: 8081
+  
+database:
+  type: sqlite
+  path: "./data/agents.db"
+  
+llm:
+  providers:
+    openai:
+      api_key: "sk-your-openai-api-key-here"
+      base_url: "https://api.openai.com/v1"
+    anthropic:
+      api_key: "sk-ant-your-anthropic-api-key-here"
+      base_url: "https://api.anthropic.com"
+    mistral:
+      api_key: "your-mistral-api-key-here"
+      base_url: "https://api.mistral.ai"
+    grok:
+      api_key: "xai-your-grok-api-key-here"
+      base_url: "https://api.x.ai"
+    ollama:
+      base_url: "http://localhost:11434"
+
+logging:
+  level: info
+  format: json
+
+context:
+  strategies:
+    last_n:
+      default_count: 10
+    sliding_window:
+      window_size: 5
+      overlap: 2
+    summarize:
+      summary_model: "gpt-3.5-turbo"
+      max_context_length: 20
