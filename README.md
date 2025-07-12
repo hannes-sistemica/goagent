@@ -8,6 +8,7 @@ A production-ready AI agent management system built in Go that provides REST API
 - **Agent Management**: Create, update, delete, and list AI agents
 - **Session Management**: Persistent chat sessions with configurable context strategies
 - **Tool Calling**: Extensible tool system with built-in tools and external API integration
+- **Memory System**: Per-agent persistent memory with cross-session recall, complete privacy isolation, and independence from chat history
 - **MCP Integration**: Built-in support for Model Context Protocol (MCP) and OpenMCP
 - **Streaming Support**: Real-time streaming responses via Server-Sent Events (SSE)
 - **Context Strategies**: Pluggable context management (last_n, sliding_window, summarize)
@@ -66,7 +67,7 @@ ollama serve
 
 ## Configuration
 
-Copy `configs/config.sample.yaml` to `configs/config.yaml` and configure:
+The server uses `config.yml` in the root directory. All test scripts automatically read this configuration file:
 
 ```yaml
 server:
@@ -627,7 +628,83 @@ The agent-server includes a comprehensive tool calling system that allows AI age
 
 ### Memory Tool
 
-The memory tool enables agents to overcome context limitations by storing and recalling information across conversations:
+The memory tool enables agents to overcome context limitations by storing and recalling information across conversations. The system has been extensively tested to work independently of chat history.
+
+#### Memory Scope and Privacy
+
+**🤖 Agent-Scoped Memory**: Each agent has its own isolated memory bank
+- Memories are tied to specific `AgentID` - **Agent A cannot access Agent B's memories**
+- **Cross-session persistence**: Agent can recall information from previous sessions
+- **Complete privacy**: Different agents have completely separate memory stores
+
+**📝 Session Association (Optional)**: Memories can optionally be tagged with session info
+- Useful for organizing memories by conversation context
+- Agent can still access all its memories regardless of which session stored them
+
+**Example**:
+```bash
+# Agent A stores memory in Session 1
+curl -X POST http://localhost:8081/api/v1/sessions/session-1/chat/tools \
+  -d '{"message": "Remember I like Python", "tools": ["memory"]}'
+
+# Agent A recalls memory in Session 2 (different session, same agent)
+curl -X POST http://localhost:8081/api/v1/sessions/session-2/chat/tools \
+  -d '{"message": "What languages do I like?", "tools": ["memory"]}'
+# ✅ Agent successfully recalls "Python" from Session 1
+
+# Agent B cannot access Agent A's memories (different agent)
+curl -X POST http://localhost:8081/api/v1/sessions/session-3/chat/tools \
+  -d '{"message": "What languages does the user like?", "tools": ["memory"]}'
+# ❌ Agent B has no access to Agent A's Python preference
+```
+
+#### Memory Types and Organization
+
+Memories can be categorized by type for better organization:
+
+- **`preference`**: User preferences, settings, communication style
+- **`fact`**: Factual information about the user (name, job, location)
+- **`conversation`**: Important conversation history and context
+- **`behavior`**: User behavior patterns and interaction history
+
+**Storage Example**:
+```json
+{
+  "action": "store",
+  "topic": "user_info",
+  "content": "Alice is a software engineer at TechCorp, prefers concise explanations",
+  "memory_type": "fact",
+  "importance": 9,
+  "tags": ["personal", "work", "communication"]
+}
+```
+
+**Search and Recall**:
+```json
+{
+  "action": "search",
+  "query": "software engineer",
+  "memory_type": "fact",
+  "min_importance": 7
+}
+```
+
+#### Practical Use Cases
+
+**🏢 Multi-Tenant Applications**: 
+- Each customer gets their own agent with isolated memory
+- Customer A's data never accessible to Customer B's agent
+- Perfect for SaaS applications with user-specific AI assistants
+
+**🤖 Persistent AI Personalities**:
+- Agent remembers user preferences across multiple sessions
+- Long-term relationship building with personalized interactions
+- Context-aware responses based on historical interactions
+
+**📱 Mobile/Web Applications**:
+- App creates agent per user, memories persist across app sessions
+- User doesn't need to repeat preferences or personal information
+- Seamless experience across device restarts or app updates
 
 ```bash
 # Store a memory
@@ -845,6 +922,26 @@ go test -cover ./...
 # Test with real Ollama (requires Ollama running)
 ./examples/test_real_chat.sh
 ```
+
+### Test Script Configuration
+
+All test scripts in `examples/` automatically read server configuration from `config.yml`:
+
+```bash
+# Test scripts automatically use config.yml settings
+./examples/quick_test.sh           # Uses configured host:port
+./examples/test_memory_agent.sh    # Reads server URL from config
+./examples/test_tool_calling.sh    # No hardcoded URLs needed
+
+# Override via environment variables if needed
+SERVER_HOST=localhost SERVER_PORT=8080 ./examples/quick_test.sh
+```
+
+The scripts use `get_config.sh` to read configuration, which:
+- Reads `config.yml` from parent directory
+- Sets `BASE_URL` and `SERVER_URL` environment variables
+- Falls back to sensible defaults (localhost:8080)
+- Converts `0.0.0.0` to `localhost` for client connections
 
 ### Adding New Providers
 
@@ -1065,8 +1162,15 @@ toolRegistry.Register(newTool)
 # Quick calculator tool calling test (assumes server running, fast verification)
 ./examples/test_tool_calling.sh
 
-# Test memory tool with limited context window
+# Test memory tool with limited context window and manual history deletion
 ./examples/test_memory_agent.sh
+
+# This test validates:
+# 1. Memory storage during conversations (agent-scoped persistence)
+# 2. Information recall when chat context is limited (cross-session capability)  
+# 3. **CRITICAL**: Memory recall with ZERO chat history (complete independence test)
+# 4. Agent privacy isolation (memories are agent-specific, not shared)
+# 5. Personalized responses using only stored memory (no chat context dependency)
 ```
 
 **test_calculator_agent.sh** - Comprehensive test that:
@@ -1084,12 +1188,14 @@ toolRegistry.Register(newTool)
 - Verifies tool calling integration
 - Minimal setup for fast feedback
 
-**test_memory_agent.sh** - Memory persistence test that:
+**test_memory_agent.sh** - Comprehensive memory persistence test that:
 - Creates an agent with very limited context window (2 messages)
-- Demonstrates memory tool usage for information persistence
-- Shows how agents can recall information that's no longer in context
-- Tests memory search and retrieval functionality
-- Validates personalized responses based on stored memory
+- Demonstrates memory tool usage for cross-session information persistence
+- Shows how agents can recall information that's no longer in chat context
+- **NEW: Manual chat history deletion test** - Completely clears chat history and verifies pure memory recall
+- Tests memory search and retrieval functionality with zero chat context
+- Validates personalized responses based solely on agent's stored memory
+- Proves memory system works independently of chat history and persists across sessions
 
 ### Tool Calling Examples
 

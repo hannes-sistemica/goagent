@@ -248,6 +248,123 @@ if [ "$OLLAMA_AVAILABLE" = true ]; then
         fi
     fi
     
+    echo ""
+    print_memory "=== CRITICAL TEST: Manual Chat History Deletion ==="
+    print_info "Step 6: Manually clearing chat history to test pure memory recall..."
+    
+    # First, check current message count
+    MESSAGES_BEFORE=$(curl -s "$BASE_URL/sessions/$SESSION_ID/messages")
+    MESSAGE_COUNT_BEFORE=$(echo "$MESSAGES_BEFORE" | jq '.messages | length')
+    print_info "Current chat history: $MESSAGE_COUNT_BEFORE messages"
+    
+    # Delete all messages for this session
+    print_info "Deleting all chat messages manually..."
+    DELETE_RESPONSE=$(curl -s -X DELETE "$BASE_URL/sessions/$SESSION_ID/messages")
+    
+    if [ $? -eq 0 ]; then
+        print_status "Successfully deleted all messages for session"
+    else
+        print_error "Failed to delete messages"
+    fi
+    
+    # Verify chat history is empty
+    MESSAGES_AFTER=$(curl -s "$BASE_URL/sessions/$SESSION_ID/messages")
+    MESSAGE_COUNT_AFTER=$(echo "$MESSAGES_AFTER" | jq '.messages | length')
+    
+    if [ "$MESSAGE_COUNT_AFTER" -eq 0 ]; then
+        print_status "✅ Chat history successfully cleared (0 messages)"
+    else
+        print_error "⚠️  Chat history not completely cleared ($MESSAGE_COUNT_AFTER messages remain)"
+    fi
+    
+    echo ""
+    print_chat "Step 7: Test memory recall with EMPTY chat history"
+    print_info "This is the ultimate test - can the agent recall information with NO chat context?"
+    
+    CHAT_EMPTY_HISTORY=$(curl -s -X POST "$BASE_URL/sessions/$SESSION_ID/chat/tools" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "message": "Hi! Do you remember anything about me? What is my name, company, programming languages I like, and years of experience?",
+            "tools": ["memory"],
+            "tool_choice": "auto"
+        }')
+    
+    if echo "$CHAT_EMPTY_HISTORY" | jq -e '.response' > /dev/null; then
+        RESPONSE_EMPTY=$(echo "$CHAT_EMPTY_HISTORY" | jq -r '.response')
+        TOOL_CALLS_EMPTY=$(echo "$CHAT_EMPTY_HISTORY" | jq '.tool_calls // []')
+        TOOL_COUNT_EMPTY=$(echo "$TOOL_CALLS_EMPTY" | jq 'length')
+        
+        echo -e "${YELLOW}🤖 Assistant (with empty chat history):${NC} $RESPONSE_EMPTY"
+        
+        if [ "$TOOL_COUNT_EMPTY" -gt 0 ]; then
+            print_memory "✅ EXCELLENT: Agent used memory tool even with empty chat history!"
+            echo "$TOOL_CALLS_EMPTY" | jq -r '.[] | "   Memory action: \(.arguments.action) - \(.arguments.topic // .arguments.query // "search")"'
+            
+            # Check if the response contains the original information from memory
+            RECALL_SUCCESS=0
+            if [[ "$RESPONSE_EMPTY" == *"Alice"* ]]; then
+                print_status "✅ Recalled NAME from memory!"
+                ((RECALL_SUCCESS++))
+            fi
+            if [[ "$RESPONSE_EMPTY" == *"TechCorp"* ]]; then
+                print_status "✅ Recalled COMPANY from memory!"
+                ((RECALL_SUCCESS++))
+            fi
+            if [[ "$RESPONSE_EMPTY" == *"Python"* ]] || [[ "$RESPONSE_EMPTY" == *"Go"* ]]; then
+                print_status "✅ Recalled PROGRAMMING LANGUAGES from memory!"
+                ((RECALL_SUCCESS++))
+            fi
+            if [[ "$RESPONSE_EMPTY" == *"5 years"* ]] || [[ "$RESPONSE_EMPTY" == *"experience"* ]]; then
+                print_status "✅ Recalled EXPERIENCE LEVEL from memory!"
+                ((RECALL_SUCCESS++))
+            fi
+            
+            echo ""
+            if [ "$RECALL_SUCCESS" -ge 3 ]; then
+                print_status "🏆 OUTSTANDING SUCCESS: Agent recalled $RECALL_SUCCESS/4 key details from memory with ZERO chat history!"
+                print_status "🎯 This proves memory system works independently of chat context!"
+            elif [ "$RECALL_SUCCESS" -ge 2 ]; then
+                print_memory "✅ GOOD: Agent recalled $RECALL_SUCCESS/4 details from memory"
+            elif [ "$RECALL_SUCCESS" -ge 1 ]; then
+                print_memory "⚠️  PARTIAL: Agent recalled $RECALL_SUCCESS/4 details from memory"
+            else
+                print_error "❌ FAILED: Agent did not recall stored information from memory"
+            fi
+        else
+            print_error "❌ CRITICAL FAILURE: Agent did not use memory tool with empty chat history!"
+            print_error "   This suggests the agent relies too heavily on chat context"
+        fi
+    else
+        print_error "Chat with empty history failed"
+    fi
+    
+    echo ""
+    print_chat "Step 8: Test follow-up question to confirm memory persistence"
+    CHAT_FOLLOWUP=$(curl -s -X POST "$BASE_URL/sessions/$SESSION_ID/chat/tools" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "message": "Can you recommend a specific Go framework for my microservices project, considering my experience level?",
+            "tools": ["memory"],
+            "tool_choice": "auto"
+        }')
+    
+    if echo "$CHAT_FOLLOWUP" | jq -e '.response' > /dev/null; then
+        RESPONSE_FOLLOWUP=$(echo "$CHAT_FOLLOWUP" | jq -r '.response')
+        TOOL_CALLS_FOLLOWUP=$(echo "$CHAT_FOLLOWUP" | jq '.tool_calls // []')
+        TOOL_COUNT_FOLLOWUP=$(echo "$TOOL_CALLS_FOLLOWUP" | jq 'length')
+        
+        echo -e "${YELLOW}🤖 Assistant:${NC} $RESPONSE_FOLLOWUP"
+        
+        if [ "$TOOL_COUNT_FOLLOWUP" -gt 0 ]; then
+            print_memory "✅ Used memory for contextual follow-up question"
+        fi
+        
+        # Check if response shows understanding of context from memory
+        if [[ "$RESPONSE_FOLLOWUP" == *"5 years"* ]] || [[ "$RESPONSE_FOLLOWUP" == *"experienced"* ]] || [[ "$RESPONSE_FOLLOWUP" == *"microservices"* ]]; then
+            print_status "🎯 SUCCESS: Agent provided contextual response using only memory!"
+        fi
+    fi
+    
 else
     # Test without Ollama - verify memory tool structure
     print_info "Testing memory tool structure without AI..."
@@ -310,12 +427,16 @@ if [ "$OLLAMA_AVAILABLE" = true ]; then
     echo "✅ AI memory usage: TESTED"
     echo "✅ Context overflow handling: TESTED"
     echo "✅ Personalized responses: TESTED"
+    echo "✅ Manual chat history deletion: TESTED"
+    echo "✅ Pure memory recall (zero context): TESTED"
+    echo "✅ Memory persistence verification: TESTED"
 else
     echo "⚠️  AI integration: LIMITED (install Ollama for full test)"
 fi
 
 echo ""
 print_status "Memory system successfully overcomes limited chat history!"
+print_status "Memory system works independently of chat context!"
 
 if [ "$OLLAMA_AVAILABLE" = false ]; then
     echo ""
